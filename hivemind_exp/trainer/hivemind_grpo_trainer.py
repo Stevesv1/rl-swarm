@@ -40,7 +40,25 @@ class HivemindGRPOTrainer:
             self.dht = dht
             self.logger = logger
             self.stage_rewards = 0.0
+            self.last_step_time = time.time()
+            self.step_count = 0
             super().__init__(processing_class=tokenizer, **kwargs)
+        
+        def training_step(self, *args, **kwargs):
+            current_time = time.time()
+            if self.step_count > 0:
+                time_since_last_step = current_time - self.last_step_time
+                if time_since_last_step > 60:  # Log if more than 60 seconds between steps
+                    self.logger.warning(f"Long delay between steps: {time_since_last_step:.2f}s")
+            
+            self.last_step_time = current_time
+            self.step_count += 1
+            self.logger.info(f"Starting training step {self.step_count}")
+            
+            result = super().training_step(*args, **kwargs)
+            
+            self.logger.info(f"Completed training step {self.step_count}")
+            return result
 
         def publish_leaderboard(self):
             r, s = self.node.round_num, self.node.stage_num
@@ -203,21 +221,30 @@ class HivemindGRPOTrainer:
 
     def train_and_save(self, trainer, train_dataset):
         train_result = trainer.train()
-
+    
         # Log and save metrics
         metrics = train_result.metrics
         metrics["train_samples"] = len(train_dataset)
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
-
+    
         self.logger.info("Saving model")
-        trainer.model.config.use_cache = True
+        
+        # Never set use_cache=True if gradient checkpointing is enabled
+        if not self.config.gradient_checkpointing:
+            self.logger.info("Gradient checkpointing disabled, setting use_cache=True for inference")
+            trainer.model.config.use_cache = True
+        else:
+            self.logger.info("Gradient checkpointing enabled, maintaining use_cache=False")
+            # Explicitly ensure use_cache is False
+            trainer.model.config.use_cache = False
+        
         trainer.save_model(self.config.output_dir)
-        self.logger.info(f"Model saved to {self.config.output_dir}")
+        self.logger.info(f"Model saved to {self.config.output_dir} with use_cache={trainer.model.config.use_cache}")
         assert self.config.distributed_state
         self.config.distributed_state.wait_for_everyone()  # wait for all processes to load
-
+    
         self.tokenizer.save_pretrained(self.config.output_dir)
         self.logger.info(f"Tokenizer saved to {self.config.output_dir}")
 
