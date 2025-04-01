@@ -39,11 +39,22 @@ class GRPOArguments:
 class GRPORunner:
     def get_model(self, args: GRPOConfig, model_name: str):
         model_init_kwargs = args.model_init_kwargs or {}
-        # Disable caching if gradient checkpointing is enabled (not supported)
-        model_init_kwargs["use_cache"] = (
-            False if args.gradient_checkpointing else model_init_kwargs.get("use_cache")
-        )
-        return AutoModelForCausalLM.from_pretrained(model_name, **model_init_kwargs)
+        
+        # Always disable caching if gradient checkpointing is enabled (not supported)
+        if args.gradient_checkpointing:
+            logger.info("Gradient checkpointing is enabled - forcing use_cache=False")
+            model_init_kwargs["use_cache"] = False
+        
+        model = AutoModelForCausalLM.from_pretrained(model_name, **model_init_kwargs)
+        
+        # Double check that use_cache is False if gradient checkpointing is enabled
+        if args.gradient_checkpointing:
+            if getattr(model.config, "use_cache", None) is not False:
+                logger.info(f"Setting model.config.use_cache from {model.config.use_cache} to False")
+                model.config.use_cache = False
+        
+        logger.info(f"Model loaded with use_cache={getattr(model.config, 'use_cache', None)}")
+        return model
 
     def get_tokenizer_name(self, model_args: ModelConfig, script_args: GRPOArguments):
         if script_args.tokenizer_name_or_path:
