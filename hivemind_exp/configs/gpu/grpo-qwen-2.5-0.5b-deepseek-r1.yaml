@@ -6,6 +6,7 @@ attn_implementation: flash_attention_2
 bf16: true
 tf32: true
 output_dir: runs/gsm8k/multinode/Qwen2.5-0.5B-Instruct-Gensyn-Swarm
+use_cache: false  # Explicitly set use_cache to false since we're using gradient_checkpointing
 
 # Dataset arguments
 dataset_id_or_path: 'openai/gsm8k'
